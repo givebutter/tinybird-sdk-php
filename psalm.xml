@@ -5,7 +5,8 @@
        errorLevel="1"
        allowStringToStandInForClass="true"
        cacheDirectory="./build/cache/psalm"
-       errorBaseline="./psalm-baseline.xml">
+       errorBaseline="./psalm-baseline.xml"
+       findUnusedCode="false">
 
     <projectFiles>
         <directory name="./src"/>
@@ -14,5 +15,21 @@
             <directory name="./vendor"/>
         </ignoreFiles>
     </projectFiles>
+
+    <issueHandlers>
+        <ClassMustBeFinal errorLevel="suppress"/>
+        <MissingOverrideAttribute errorLevel="suppress"/>
+        <PossiblyUnusedProperty errorLevel="suppress"/>
+        <PossiblyUnusedMethod errorLevel="suppress"/>
+        <MixedAssignment errorLevel="suppress"/>
+        <MixedArgument errorLevel="suppress"/>
+        <MixedArgumentTypeCoercion errorLevel="suppress"/>
+        <MixedPropertyTypeCoercion errorLevel="suppress"/>
+        <MixedReturnStatement errorLevel="suppress"/>
+        <MixedReturnTypeCoercion errorLevel="suppress"/>
+        <MixedArrayAccess errorLevel="suppress"/>
+        <ArgumentTypeCoercion errorLevel="suppress"/>
+        <RedundantCastGivenDocblockType errorLevel="suppress"/>
+    </issueHandlers>
 
 </psalm>

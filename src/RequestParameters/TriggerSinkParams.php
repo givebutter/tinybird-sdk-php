@@ -35,7 +35,8 @@ class TriggerSinkParams extends AbstractRequestParameters
         $params = parent::jsonSerialize();
 
         if (isset($params['template_variables'])) {
-            $vars = $params['template_variables'];
+            /** @var array<string, mixed> $vars */
+            $vars = (array) $params['template_variables'];
             unset($params['template_variables']);
 
             return [...$params, ...$vars];
