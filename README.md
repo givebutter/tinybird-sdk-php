@@ -27,6 +27,7 @@ $result = $tinybird->query()->sql('SELECT count() FROM clicks');
 - **High-frequency ingestion** — Send millions of events per second via Events API
 - **Schema generation** — Analyze files to generate Data Source schemas
 - **Sub-second queries** — Execute SQL queries with instant results
+- **Concurrent requests** — Batch multiple queries for parallel execution
 - **Multi-region support** — EU, US, AWS, GCP, and custom deployments
 - **Built-in retry logic** — Automatic retry with exponential backoff
 - **PSR-18 compatible** — Works with Symfony, Guzzle, or any HTTP client
@@ -221,6 +222,31 @@ echo $result->getRowsRead();
 echo $result->getBytesRead();
 ```
 
+#### Batch Queries
+
+Execute multiple SQL queries concurrently for better performance:
+
+```php
+// Run multiple queries in parallel
+$results = $tinybird->query()->batchSql([
+    'total_users' => 'SELECT count() FROM users',
+    'active_today' => 'SELECT count() FROM events WHERE date = today()',
+    'revenue' => 'SELECT sum(amount) FROM orders',
+]);
+
+// Access individual results
+foreach ($results as $key => $result) {
+    if ($result->isSuccess()) {
+        echo "{$key}: " . $result->getData()->data[0];
+    } else {
+        echo "{$key} failed: " . $result->getException()->getMessage();
+    }
+}
+
+// Or get data directly
+$totalUsers = $results['total_users']->getData()->data[0]['count()'];
+```
+
 ### Pipes API
 
 Query published API Endpoints and list Pipes.
@@ -238,6 +264,36 @@ $result = $tinybird->pipes()->query('my_analytics_endpoint', [
 
 foreach ($result->data as $row) {
     // Process results
+}
+```
+
+#### Batch Pipe Queries
+
+Query multiple Pipe endpoints concurrently:
+
+```php
+// Simple: key is pipe name
+$results = $tinybird->pipes()->batchQuery([
+    'user_stats' => ['date' => '2025-01-01'],
+    'event_counts' => ['type' => 'click'],
+]);
+
+// Query same pipe multiple times using # alias
+$results = $tinybird->pipes()->batchQuery([
+    'user_stats#jan' => ['date' => '2025-01-01'],
+    'user_stats#feb' => ['date' => '2025-02-01'],
+    'user_stats#mar' => ['date' => '2025-03-01'],
+]);
+
+// Handle results with error isolation
+foreach ($results as $key => $result) {
+    if ($result->isSuccess()) {
+        $data = $result->getData();
+        echo "{$key}: {$data->rows} rows";
+    } else {
+        // Individual failures don't affect other queries
+        echo "{$key} failed: " . $result->getException()->getMessage();
+    }
 }
 ```
 
@@ -405,8 +461,8 @@ $tinybird = new Client($options);
 | `analyze()` | `analyzeContent()`, `analyzeRecords()`, `analyzeUrl()` |
 | `events()` | `send()`, `sendRaw()`, `sendJson()` |
 | `dataSources()` | `list()`, `retrieve()`, `quarantine()` |
-| `query()` | `sql()` |
-| `pipes()` | `list()`, `retrieve()`, `query()`, `getData()`, `explain()` |
+| `query()` | `sql()`, `batchSql()` |
+| `pipes()` | `list()`, `retrieve()`, `query()`, `batchQuery()`, `getData()`, `explain()` |
 | `jobs()` | `list()`, `retrieve()`, `cancel()` |
 | `variables()` | `list()`, `retrieve()`, `create()`, `update()`, `remove()` |
 | `tokens()` | `list()`, `retrieve()`, `create()`, `createJwt()`, `update()`, `refresh()`, `remove()` |
@@ -418,6 +474,7 @@ See the [examples](./examples) directory for complete working examples:
 
 - [Quick Start](./examples/quick-start) — Basic SDK usage
 - [Analyze API](./examples/analyze) — Schema inference
+- [Batch Queries](./examples/batch-queries) — Concurrent query execution
 - [Data Sources](./examples/datasources) — List and inspect Data Sources
 - [Events API](./examples/events) — High-frequency ingestion
 - [Jobs API](./examples/jobs) — Monitor background jobs

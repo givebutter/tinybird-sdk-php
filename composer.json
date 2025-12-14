@@ -45,6 +45,7 @@
         "vimeo/psalm": "^6.14"
     },
     "suggest": {
+        "guzzlehttp/promises": "Required for async batch requests",
         "nyholm/psr7": "PSR-7 message implementation",
         "symfony/http-client": "HTTP client"
     },
