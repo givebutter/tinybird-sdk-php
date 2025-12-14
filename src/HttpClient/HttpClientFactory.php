@@ -13,6 +13,7 @@ use Http\Client\Common\Plugin\BaseUriPlugin;
 use Http\Client\Common\Plugin\HeaderSetPlugin;
 use Http\Client\Common\PluginClientFactory;
 use Http\Client\Curl\Client as CurlHttpClient;
+use Http\Client\HttpAsyncClient;
 use Http\Discovery\Psr17FactoryDiscovery;
 use Http\Discovery\Psr18ClientDiscovery;
 use Http\Message\Authentication\Bearer as AuthenticationBearer;
@@ -32,6 +33,7 @@ class HttpClientFactory implements HttpClientFactoryInterface
     private RequestFactoryInterface $requestFactory;
     private UriFactoryInterface $uriFactory;
     private ?StreamFactoryInterface $streamFactory;
+    private ?ClientInterface $pluginClient = null;
 
     public function __construct(
         ?RequestFactoryInterface $requestFactory = null,
@@ -64,11 +66,32 @@ class HttpClientFactory implements HttpClientFactoryInterface
             $plugins[] = new AuthenticationPlugin(new AuthenticationBearer($options->getToken()));
         }
 
+        $this->pluginClient = (new PluginClientFactory())->createClient($httpClient, $plugins);
+
         return new HttpMethodsClient(
-            (new PluginClientFactory())->createClient($httpClient, $plugins),
+            $this->pluginClient,
             $this->requestFactory,
             $this->streamFactory,
         );
+    }
+
+    public function getAsyncClient(): ?HttpAsyncClient
+    {
+        if ($this->pluginClient instanceof HttpAsyncClient) {
+            return $this->pluginClient;
+        }
+
+        return null;
+    }
+
+    public function getRequestFactory(): RequestFactoryInterface
+    {
+        return $this->requestFactory;
+    }
+
+    public function getStreamFactory(): ?StreamFactoryInterface
+    {
+        return $this->streamFactory;
     }
 
     private function resolveHttpClient(ClientOptions $options): ClientInterface

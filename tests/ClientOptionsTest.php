@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Brd6\Test\TinybirdSdk;
 
+use Brd6\Test\TinybirdSdk\Mock\MockAsyncHttpClient;
 use Brd6\TinybirdSdk\ClientOptions;
 use Brd6\TinybirdSdk\Enum\Region;
+use Psr\Http\Client\ClientInterface;
 
 class ClientOptionsTest extends TestCase
 {
@@ -97,5 +99,28 @@ class ClientOptionsTest extends TestCase
         $this->assertSame(30, $options->getTimeout());
         $this->assertTrue($options->hasCompression());
         $this->assertSame('v0', $options->getApiVersion());
+    }
+
+    public function testHasAsyncSupportWithoutClient(): void
+    {
+        $options = new ClientOptions();
+
+        $this->assertFalse($options->hasAsyncSupport());
+    }
+
+    public function testHasAsyncSupportWithSyncOnlyClient(): void
+    {
+        $syncClient = $this->mockery(ClientInterface::class);
+        $options = (new ClientOptions())->setHttpClient($syncClient);
+
+        $this->assertFalse($options->hasAsyncSupport());
+    }
+
+    public function testHasAsyncSupportWithAsyncClient(): void
+    {
+        $asyncClient = $this->createMock(MockAsyncHttpClient::class);
+        $options = (new ClientOptions())->setHttpClient($asyncClient);
+
+        $this->assertTrue($options->hasAsyncSupport());
     }
 }

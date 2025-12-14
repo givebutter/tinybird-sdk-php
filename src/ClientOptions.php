@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Brd6\TinybirdSdk;
 
 use Brd6\TinybirdSdk\Enum\Region;
+use Http\Client\HttpAsyncClient;
 use Psr\Http\Client\ClientInterface as HttpClientInterface;
 
 class ClientOptions
@@ -119,6 +120,11 @@ class ClientOptions
         $this->httpClient = $httpClient;
 
         return $this;
+    }
+
+    public function hasAsyncSupport(): bool
+    {
+        return $this->httpClient instanceof HttpAsyncClient;
     }
 
     public function getRetryMaxRetries(): int

@@ -7,28 +7,23 @@ namespace Brd6\TinybirdSdk\HttpClient;
 use Brd6\TinybirdSdk\ClientOptions;
 use Brd6\TinybirdSdk\Constant\HttpStatusCode;
 use Brd6\TinybirdSdk\Exception\ApiException;
-use Brd6\TinybirdSdk\Exception\AuthenticationException;
-use Brd6\TinybirdSdk\Exception\RateLimitException;
 use Brd6\TinybirdSdk\Exception\RequestTimeoutException;
+use Brd6\TinybirdSdk\Exception\TinybirdException;
 use Brd6\TinybirdSdk\Util\UrlHelper;
 use Http\Client\Common\HttpMethodsClientInterface;
 use Http\Client\Exception as HttpClientException;
 use Http\Client\Exception\HttpException;
 use Http\Client\Exception\RequestException;
 use Psr\Http\Message\ResponseInterface;
-use RuntimeException;
 
 use function count;
 use function in_array;
-use function json_decode;
+use function is_array;
 use function json_encode;
-use function json_last_error;
 use function ltrim;
-use function sprintf;
 use function str_contains;
 use function usleep;
 
-use const JSON_ERROR_NONE;
 use const JSON_THROW_ON_ERROR;
 
 class HttpRequestHandler
@@ -37,18 +32,19 @@ class HttpRequestHandler
     private const RETRY_AFTER_HEADER = 'retry-after';
 
     private HttpMethodsClientInterface $httpClient;
+    private HttpClientFactory $httpClientFactory;
+    private ResponseParser $responseParser;
     private string $apiVersion;
-    private string $token;
     private int $retryMaxRetries;
     private int $retryDelayMs;
     private int $retryBackoffMultiplier;
 
     public function __construct(ClientOptions $options, ?HttpClientFactory $httpClientFactory = null)
     {
-        $httpClientFactory ??= new HttpClientFactory();
-        $this->httpClient = $httpClientFactory->create($options);
+        $this->httpClientFactory = $httpClientFactory ?? new HttpClientFactory();
+        $this->httpClient = $this->httpClientFactory->create($options);
+        $this->responseParser = new ResponseParser($options->getToken());
         $this->apiVersion = $options->getApiVersion();
-        $this->token = $options->getToken();
         $this->retryMaxRetries = $options->getRetryMaxRetries();
         $this->retryDelayMs = $options->getRetryDelayMs();
         $this->retryBackoffMultiplier = $options->getRetryBackoffMultiplier();
@@ -76,6 +72,80 @@ class HttpRequestHandler
     }
 
     /**
+     * @param array<int|string, BatchRequestItem> $requests
+     * @return array<int|string, BatchResult<array<string, mixed>>>
+     */
+    public function batchRequest(array $requests): array
+    {
+        $asyncClient = $this->httpClientFactory->getAsyncClient();
+
+        if ($asyncClient === null) {
+            return $this->executeSequentially($requests);
+        }
+
+        $preparedRequests = $this->prepareBatchRequests($requests);
+
+        $executor = new BatchRequestExecutor(
+            $asyncClient,
+            $this->httpClientFactory->getRequestFactory(),
+            $this->httpClientFactory->getStreamFactory(),
+            $this->responseParser,
+        );
+
+        $promises = $executor->dispatchAll($preparedRequests);
+
+        return $executor->waitAll($promises);
+    }
+
+    /**
+     * @param array<int|string, BatchRequestItem> $requests
+     * @return array<int|string, PreparedBatchRequest>
+     */
+    private function prepareBatchRequests(array $requests): array
+    {
+        $prepared = [];
+
+        foreach ($requests as $key => $request) {
+            $headers = $request->headers;
+
+            $prepared[$key] = new PreparedBatchRequest(
+                $request->method,
+                $this->buildPath($request->path, $request->query),
+                $headers,
+                $this->prepareBody($request->body, $headers),
+            );
+        }
+
+        return $prepared;
+    }
+
+    /**
+     * @param array<int|string, BatchRequestItem> $requests
+     * @return array<int|string, BatchResult<array<string, mixed>>>
+     */
+    private function executeSequentially(array $requests): array
+    {
+        $results = [];
+
+        foreach ($requests as $key => $request) {
+            try {
+                $data = $this->request(
+                    $request->method,
+                    $request->path,
+                    $request->query,
+                    $request->body,
+                    $request->headers,
+                );
+                $results[$key] = BatchResult::success($data);
+            } catch (TinybirdException $e) {
+                $results[$key] = BatchResult::failure($e);
+            }
+        }
+
+        return $results;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function executeWithRetry(callable $httpCall): array
@@ -86,8 +156,8 @@ class HttpRequestHandler
             try {
                 $response = $this->sendRequest($httpCall);
 
-                if ($this->isSuccessResponse($response)) {
-                    return $this->parseResponse($response);
+                if ($this->responseParser->isSuccess($response)) {
+                    return $this->responseParser->parseBody($response);
                 }
 
                 if ($this->shouldRetry($response->getStatusCode(), $attempt)) {
@@ -95,7 +165,7 @@ class HttpRequestHandler
                     continue;
                 }
 
-                throw $this->createExceptionFromResponse($response);
+                throw $this->responseParser->createException($response);
             } catch (HttpClientException $e) {
                 if ($this->canRetry($attempt)) {
                     $delay = $this->waitAndGetNextDelay($delay);
@@ -115,15 +185,10 @@ class HttpRequestHandler
             return $httpCall();
         } catch (RequestException $e) {
             if ($e instanceof HttpException) {
-                throw $this->createExceptionFromResponse($e->getResponse());
+                throw $this->responseParser->createException($e->getResponse());
             }
             throw new RequestTimeoutException();
         }
-    }
-
-    private function isSuccessResponse(ResponseInterface $response): bool
-    {
-        return $response->getStatusCode() < HttpStatusCode::MULTIPLE_CHOICES;
     }
 
     private function shouldRetry(int $statusCode, int $attempt): bool
@@ -201,57 +266,5 @@ class HttpRequestHandler
         $headers['Content-Type'] = 'application/json';
 
         return json_encode($body, JSON_THROW_ON_ERROR);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function parseResponse(ResponseInterface $response): array
-    {
-        $contents = $response->getBody()->getContents();
-
-        if ($contents === '') {
-            return [];
-        }
-
-        $data = json_decode($contents, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new RuntimeException(
-                sprintf('Unable to parse response body into JSON: %s', json_last_error()),
-            );
-        }
-
-        return $data;
-    }
-
-    private function createExceptionFromResponse(ResponseInterface $response): ApiException
-    {
-        $statusCode = $response->getStatusCode();
-        $headers = $response->getHeaders();
-        $rawData = $this->parseResponseSafely($response);
-        $message = $rawData['error'] ?? '';
-
-        if (in_array($statusCode, HttpStatusCode::AUTHENTICATION_ERROR_STATUS_CODES, true)) {
-            return new AuthenticationException($statusCode, $headers, $rawData, $message, $this->token);
-        }
-
-        if ($statusCode === HttpStatusCode::TOO_MANY_REQUESTS) {
-            return new RateLimitException($statusCode, $headers, $rawData, $message);
-        }
-
-        return new ApiException($statusCode, $headers, $rawData, $message);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function parseResponseSafely(ResponseInterface $response): array
-    {
-        try {
-            return $this->parseResponse($response);
-        } catch (RuntimeException) {
-            return [];
-        }
     }
 }
