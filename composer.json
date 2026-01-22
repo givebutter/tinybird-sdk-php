@@ -1,5 +1,5 @@
 {
-    "name": "brd6/tinybird-sdk-php",
+    "name": "givebutter/tinybird-sdk-php",
     "description": "Tinybird SDK for PHP",
     "license": "MIT",
     "type": "library",
